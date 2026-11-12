@@ -39,6 +39,13 @@
   .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); align-items:center; justify-content:center; z-index:10; padding:20px; }
   .modal.on { display:flex; }
   .modal .box { max-width:460px; width:100%; }
+  .up { display:inline-block; font-size:13px; font-weight:600; padding:4px 10px; border-radius:999px; background:#eaf1f9; color:var(--acc); }
+  .up:empty { display:none; }
+  .up.ok { background:#e8f3ec; color:var(--ok); }
+  .up.bad { background:#fdeee9; color:var(--warn); }
+  .up.busy::before { content:""; display:inline-block; width:9px; height:9px; margin-right:6px; border-radius:50%;
+    border:2px solid currentColor; border-right-color:transparent; vertical-align:-1px; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -99,7 +106,7 @@
     <span class="mode" id="modebadge"></span>
     <span class="small" id="counter"></span>
     <span class="small" id="savestate"></span>
-    <span class="small" id="upstate"></span>
+    <span class="up upstate"></span>
   </div>
   <div class="word" id="word"></div>
   <div class="hint" id="hint"></div>
@@ -120,17 +127,18 @@
 <!-- ============ DONE / EXPORT ============ -->
 <div class="screen" id="s-done"><div class="wrap">
   <h1 id="done-title">Export</h1>
+  <p><span class="up upstate"></span></p>
   <p id="done-text"></p>
   <div class="row">
-    <button class="primary" id="btn-download">Download file</button>
+    <button class="primary" id="btn-continue">Back to writing</button>
+    <button id="btn-download">Download file</button>
     <button id="btn-copy">Copy to clipboard</button>
-    <button id="btn-continue">Back to writing</button>
   </div>
-  <p class="small">If the file does not download (this happens in some embedded viewers), press “Copy” and paste the text into a message or a note.</p>
+  <p class="small" id="dl-note">If the file does not download (this happens in some embedded viewers), press “Copy” and paste the text into a message or a note.</p>
   <textarea id="dump" readonly></textarea>
   <div class="box">
-    <p class="small">New participant on the same device: export the data first, then</p>
-    <button class="warn" id="btn-reset">Delete session and start over</button>
+    <p class="small" id="reset-note">Another person wants to write on this device?</p>
+    <button id="btn-reset">Start a new participant</button>
   </div>
 </div></div>
 
@@ -179,10 +187,24 @@ function save(){
 }
 function startMsg(text, bad){ const m=$("start-msg"); m.textContent=text; m.className = bad ? "small bad" : "small"; }
 // ---------------- upload queue ----------------
-// Every committed word goes into S.outbox and is sent as one row. Rows carry a client-made upload_id
+// Every committed word goes into OUT, one queue for the whole device (kept under its own storage key, so it
+// survives a new participant on the same device), and is sent as one row. Rows carry a client-made upload_id
 // (unique in the table), so a retry after a lost response returns 409 and is treated as delivered.
 const UPLOAD_ON = !!(SUPABASE_URL && SUPABASE_KEY);
+const OUT_KEY = "beautify_pairs_en_outbox";
 let flushing = false, retryTimer = null;
+let OUT = (function(){ try{ const v = JSON.parse(store.get(OUT_KEY) || "[]"); return Array.isArray(v) ? v : []; }catch(e){ return []; } })();
+function saveOut(){
+  try{ store.set(OUT_KEY, JSON.stringify(OUT)); }
+  catch(e){ const st=$("savestate"); st.textContent="NOT saved: storage full, keep the page open until everything is sent"; st.className="small bad"; }
+}
+function addToOut(rows){
+  const have = new Set(OUT.map(r=>r.upload_id)); let n = 0;
+  rows.forEach(r=>{ if(r && r.upload_id && !have.has(r.upload_id)){ OUT.push(r); have.add(r.upload_id); n++; } });
+  if(n) saveOut();
+}
+// Sessions saved by the previous version kept their queue inside the session: move it to OUT.
+function migrateSession(){ if(S && Array.isArray(S.outbox)){ addToOut(S.outbox); delete S.outbox; save(); } }
 function newUid(){
   try{ if(crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
   const b = new Uint8Array(16); try{ crypto.getRandomValues(b); }catch(e){ for(let i=0;i<16;i++) b[i]=Math.floor(Math.random()*256); }
@@ -196,16 +218,23 @@ function rowOf(it){
     redo:it.redo||0, canvas:it.canvas||null, strokes:it.s, hand:S.hand, pen_only:!!S.pen_only,
     user_agent:S.user_agent, session_created:S.created||null };
 }
-function enqueue(it){ if(!UPLOAD_ON) return; S.outbox = S.outbox || []; S.outbox.push(rowOf(it)); }
-function uploadStatus(){
-  if(!UPLOAD_ON || !S) return "";
-  const n = (S.outbox||[]).length;
-  return n ? `${n} waiting to upload` : "uploaded";
+function enqueue(it){ if(!UPLOAD_ON) return; addToOut([rowOf(it)]); }
+let lastUpErr = "";
+function sentCount(){
+  if(!S) return 0;
+  const queued = new Set(OUT.map(r=>r.upload_id));
+  return S.items.filter(x=>x && x.uid && !queued.has(x.uid)).length;
 }
+// Visible badge (top bar and export screen): sending / all sent / not sent + reason.
 function renderUpload(){
-  const el = $("upstate"); if(!el) return;
-  const t = uploadStatus(); el.textContent = t ? "· " + t : "";
-  el.className = (S && S.outbox && S.outbox.length > 3) ? "small bad" : "small";
+  let text = "", cls = "up upstate";
+  if(UPLOAD_ON){
+    const left = OUT.length, sent = sentCount();
+    if(flushing && left){ text = `Sending… ${left} left`; cls += " busy"; }
+    else if(left){ text = `⚠ ${left} not sent` + (lastUpErr ? `: ${lastUpErr}` : "") + " · will retry"; cls += " bad"; }
+    else if(sent){ text = `✓ ${sent} sent to server`; cls += " ok"; }
+  }
+  document.querySelectorAll(".upstate").forEach(el=>{ el.textContent = text; el.className = cls; });
 }
 async function postRow(row){
   const headers = { "apikey":SUPABASE_KEY, "Content-Type":"application/json", "Prefer":"return=minimal" };
@@ -213,27 +242,34 @@ async function postRow(row){
   const r = await fetch(`${SUPABASE_URL.replace(/\/+$/,"")}/rest/v1/${SUPABASE_TABLE}`,
     { method:"POST", headers, body:JSON.stringify(row) });
   if(r.ok || r.status === 409) return true;          // 409 = this upload_id is already stored
-  let msg = ""; try{ msg = (await r.text()).slice(0,200); }catch(e){}
+  let msg = ""; try{ const t = await r.text(); try{ msg = JSON.parse(t).message || t; }catch(_){ msg = t; } }catch(e){}
+  lastUpErr = `server error ${r.status}` + (msg ? ` (${String(msg).slice(0,80)})` : "");
   console.warn("Upload failed", r.status, msg);
   return false;
 }
 async function flush(){
-  if(!UPLOAD_ON || !S || flushing) return;
-  flushing = true;
+  if(!UPLOAD_ON || flushing) return;
+  flushing = true; renderUpload();
   try{
-    while(S.outbox && S.outbox.length){
-      let ok = false;
-      try{ ok = await postRow(S.outbox[0]); }catch(e){ console.warn("Upload error", e); }
+    while(OUT.length){
+      const row = OUT[0]; let ok = false;
+      try{ ok = await postRow(row); }
+      catch(e){ lastUpErr = navigator.onLine === false ? "no internet" : "cannot reach server"; console.warn("Upload error", e); }
       if(!ok) break;
-      S.outbox.shift(); save();
+      lastUpErr = "";
+      OUT = OUT.filter(r=>r.upload_id !== row.upload_id); saveOut(); renderUpload();
     }
   } finally {
     flushing = false; renderUpload();
-    if(S && S.outbox && S.outbox.length && !retryTimer){ retryTimer = setTimeout(()=>{ retryTimer=null; flush(); }, 20000); }
-    if($("s-done").classList.contains("on")) renderDoneText();
+    if(OUT.length && !retryTimer){ retryTimer = setTimeout(()=>{ retryTimer=null; flush(); }, 15000); }
+    if(S && $("s-done").classList.contains("on")) renderDoneText();
   }
 }
 window.addEventListener("online", ()=>flush());
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState === "visible") flush(); });
+// Closing the tab while words are still unsent: the browser asks "Leave site?". They are kept on the device
+// and sent on the next visit anyway, so this is only an extra safety net.
+window.addEventListener("beforeunload", e=>{ if(UPLOAD_ON && OUT.length){ e.preventDefault(); e.returnValue = ""; } });
 
 // In-page replacement for window.confirm(), which some embedded viewers silently block (returns false).
 function ask(text){
@@ -261,11 +297,23 @@ function makePlan(pid){
 // ---------------- start ----------------
 function init(){
   $("btn-resume").style.display="none"; startMsg("");
-  const raw = store.get(LS_KEY);
-  if(raw){ try{ const old=JSON.parse(raw); if(old && old.items){ $("btn-resume").style.display="inline-block";
-      const n=old.items.filter(x=>x && x.s).length; startMsg(`Saved session “${old.participant}” found: ${n} of ${old.plan.length} words written.`); } }catch(e){} }
   if(!store.ok) startMsg("Note: this viewer blocks browser storage, so progress is kept only while the page is open. Use “Pause / export” to save a file before closing.", true);
   $("pid").value = newCode();
+}
+function loadSaved(){
+  try{ const v = JSON.parse(store.get(LS_KEY)); return (v && Array.isArray(v.plan) && Array.isArray(v.items)) ? v : null; }catch(e){ return null; }
+}
+function writtenCount(s){ return s ? s.items.filter(x=>x && x.s).length : 0; }
+// Open the saved session exactly where it stopped (no questions asked).
+function resumeSession(saved){
+  S = saved; migrateSession();
+  $("penonly").checked = !!S.pen_only; pendingBlockIntro = -1;
+  const n = writtenCount(S);
+  if(n >= S.plan.length){ S.pos = S.plan.length; finish(); return; }
+  if(S.pos >= S.plan.length || S.items[S.pos]){ const gap = S.items.findIndex(x=>!x || !x.s); S.pos = gap < 0 ? S.plan.length : gap; }
+  enterItem();
+  if(n && $("s-write").classList.contains("on")) $("hint").textContent = `Welcome back: continuing where you stopped (${n} of ${S.plan.length} written).`;
+  renderUpload();
 }
 function newCode(){
   const a=new Uint32Array(1);
@@ -276,23 +324,20 @@ init();
 $("btn-newcode").onclick = ()=>{ $("pid").value = newCode(); };
 
 $("btn-begin").onclick = async ()=>{
+  // A session already on this device is always continued, never overwritten.
+  const saved = loadSaved();
+  if(saved){ resumeSession(saved); flush(); return; }
   const pid = $("pid").value.trim();
   if(!pid){ $("pid").value = newCode(); }
   const pidv = $("pid").value.trim();
   if(!$("consent").checked){ startMsg("Please tick the consent box first.", true); $("consent").focus(); return; }
-  if(store.get(LS_KEY) && !(await ask("A session already exists in this browser. Start a new one and overwrite it? (Export it first.)"))) return;
   const {blocks, plan} = makePlan(pidv);
   S = { format:"beautify_pairs_en_v2", language:"en", participant:pidv, hand:$("hand").value,
         pen_only:$("penonly").checked, user_agent:navigator.userAgent, created:new Date().toISOString(),
-        blocks, plan, items:new Array(plan.length).fill(null), pos:0, canvas:null, outbox:[] };
+        blocks, plan, items:new Array(plan.length).fill(null), pos:0, canvas:null };
   save(); renderUpload(); enterItem();
 };
-$("btn-resume").onclick = ()=>{
-  try{ S = JSON.parse(store.get(LS_KEY)); }catch(e){ S = null; }
-  if(!S || !S.plan){ startMsg("The saved session could not be read.", true); return; }
-  S.outbox = S.outbox || [];
-  $("penonly").checked = !!S.pen_only; pendingBlockIntro = -1; enterItem(); flush();
-};
+$("btn-resume").onclick = ()=>{ const saved = loadSaved(); if(saved){ resumeSession(saved); flush(); } };
 
 // ---------------- block intros ----------------
 const BLOCK_TEXT = {
@@ -423,17 +468,25 @@ function exportObj(){
            n_items:items.length, n_planned:S.plan.length, items };
 }
 function renderDoneText(){
-  const n = S.items.filter(x=>x && x.s).length;
+  const n = writtenCount(S), total = S.plan.length, complete = n >= total;
   const el = $("done-text"); el.className = "";
-  if(!UPLOAD_ON){ el.textContent = `${n} of ${S.plan.length} words written. Download the file and send it to us.`; return; }
-  const left = (S.outbox||[]).length;
-  if(!left){ el.textContent = `${n} of ${S.plan.length} words written, and all of them have reached us. You can close this page. The file below is only a backup.`; }
-  else { el.textContent = `${n} of ${S.plan.length} words written; ${left} have not been uploaded yet (no connection?). Keep this page open while online, or download the file and send it to us.`; el.className = "bad"; }
+  const more = complete ? "" : " You can close this page and come back later: it will continue from the same word.";
+  if(!UPLOAD_ON){ el.textContent = `${n} of ${total} words written. Download the file and send it to us.`; return; }
+  const queued = new Set(OUT.map(r=>r.upload_id));
+  const left = S.items.filter(x=>x && x.uid && queued.has(x.uid)).length;
+  if(!left){ el.textContent = `${n} of ${total} words written, and all of them have reached us.` + (complete ? " You can close this page." : more) + " The file below is only an extra backup."; }
+  else { el.textContent = `${n} of ${total} words written; ${left} are still being sent. They are kept on this device and are sent automatically as soon as there is internet (also the next time this page is opened).` + more; el.className = "bad"; }
 }
 function finish(){
-  const n = S.items.filter(x=>x && x.s).length;
-  $("done-title").textContent = n>=S.plan.length ? "Done, thank you!" : "Pause / export";
-  renderDoneText();
+  const n = writtenCount(S), complete = n >= S.plan.length;
+  $("done-title").textContent = complete ? "Done, thank you!" : "Paused";
+  $("btn-continue").style.display = complete ? "none" : "";
+  $("btn-reset").className = complete ? "primary" : "";
+  $("reset-note").textContent = UPLOAD_ON
+    ? "Another person wants to write on this device? Their words are kept separately; nothing of this participant is lost."
+    : "Another person wants to write on this device? Download this participant's file first.";
+  $("dl-note").textContent = (UPLOAD_ON ? "Backup only, not required. " : "") + "If the file does not download, press “Copy” and paste the text into a message or a note.";
+  renderDoneText(); renderUpload();
   $("dump").value = JSON.stringify(exportObj());
   show("s-done"); flush();
 }
@@ -477,7 +530,13 @@ function importObj(obj){
   let pos = items.findIndex(x => !x); if(pos < 0) pos = plan.length;
   S = { format:"beautify_pairs_en_v2", language:"en", participant:obj.participant, hand:obj.hand || "right",
         pen_only: obj.pen_only !== false, user_agent:navigator.userAgent, created:obj.created || new Date().toISOString(),
-        imported_from: obj.exported || null, blocks, plan, items, pos, canvas:null, outbox:[] };
+        imported_from: obj.exported || null, blocks, plan, items, pos, canvas:null };
+  // Same participant already on this device: keep every word from both, so nothing is lost.
+  const here = loadSaved();
+  if(here && here.participant === obj.participant){
+    here.items.forEach((it, i)=>{ if(it && it.s && !items[i]){ items[i] = it; n++; } });
+    S.pos = items.findIndex(x => !x); if(S.pos < 0) S.pos = plan.length;
+  }
   // Re-send imported words; ones already uploaded from the other device are skipped by upload_id (409).
   items.forEach(it=>{ if(it){ if(!it.uid) it.uid = newUid(); enqueue(it); } });
   return {n, skipped};
@@ -485,7 +544,10 @@ function importObj(obj){
 async function doImport(text){
   let obj;
   try{ obj = JSON.parse(text); }catch(e){ startMsg("Could not read the file: not valid JSON.", true); return; }
-  if(store.get(LS_KEY) && !(await ask("A session already exists in this browser. Replace it with the imported one?"))) return;
+  const here = loadSaved();
+  if(here && obj && here.participant !== obj.participant && writtenCount(here) &&
+     !(await ask(`This device has participant “${here.participant}” (${writtenCount(here)} words). Switch to the imported participant “${obj.participant}”?` +
+       (UPLOAD_ON ? " Words of the current participant stay saved and keep being sent." : " Download the current participant's file first.")))) return;
   try{
     const {n, skipped} = importObj(obj);
     save(); $("penonly").checked = !!S.pen_only;
@@ -502,14 +564,24 @@ $("importfile").onchange = (e)=>{
 $("btn-import-paste-toggle").onclick = ()=>{ const b=$("pastebox"); b.style.display = b.style.display==="none" ? "block" : "none"; };
 $("btn-import-paste").onclick = ()=> doImport($("importtext").value);
 
+// New participant on the same device. The finished participant's unsent words stay in OUT (own storage key)
+// and keep being sent, so with uploads on nothing is deleted that has not reached the server.
 $("btn-reset").onclick = async ()=>{
-  const left = (S && S.outbox) ? S.outbox.length : 0;
-  if(!(await ask("Delete all recordings of this session from the browser? Make sure you have exported them." +
-    (left ? ` ${left} words have NOT been uploaded yet and will be lost.` : "")))) return;
+  const n = writtenCount(S), total = S ? S.plan.length : 0;
+  let q = n < total ? `This participant has written ${n} of ${total} words. Start a new participant anyway?` : "Start a new participant on this device?";
+  q += UPLOAD_ON ? " Everything this participant wrote stays saved." : " Make sure you have downloaded this participant's file: it will be removed from this device.";
+  if(!(await ask(q))) return;
   store.del(LS_KEY); S = null; cur = []; t0 = null; pendingBlockIntro = -1;
-  $("consent").checked = false; $("btn-copy").textContent = "Copy to clipboard";
-  init(); show("s-start");
+  $("consent").checked = false; $("btn-copy").textContent = "Copy to clipboard"; $("btn-download").textContent = "Download file";
+  init(); show("s-start"); renderUpload(); flush();
 };
+
+// ---------------- boot: continue a saved session straight away ----------------
+(function boot(){
+  const saved = loadSaved();
+  if(saved) resumeSession(saved);
+  flush();
+})();
 </script>
 </body>
 </html>

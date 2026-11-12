@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>English handwriting collection: fast / neat</title>
+<style>
+  :root { --bg:#f6f5f2; --ink:#1b1b1b; --muted:#777; --acc:#2f6fb2; --warn:#b5482d; --ok:#2f8a4a; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-user-select:none; user-select:none; }
+  .screen { display:none; height:100%; flex-direction:column; }
+  .screen.on { display:flex; }
+  .wrap { max-width:760px; margin:0 auto; padding:24px 20px; }
+  h1 { font-size:22px; margin:0 0 12px; }
+  p, li { line-height:1.45; font-size:15px; }
+  label { display:block; margin:14px 0 4px; font-size:14px; color:#444; }
+  input[type=text], select { font-size:16px; padding:8px 10px; width:100%; border:1px solid #ccc; border-radius:6px; background:#fff; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { font-size:16px; padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; cursor:pointer; }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button.warn { color:var(--warn); border-color:var(--warn); }
+  button:disabled { opacity:.4; cursor:default; }
+  .top { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; background:#fff; border-bottom:1px solid #ddd; gap:12px; flex-wrap:wrap; }
+  .mode { font-weight:600; padding:4px 10px; border-radius:6px; font-size:14px; }
+  .mode.fast { background:#fdeee9; color:var(--warn); }
+  .mode.neat { background:#e8f3ec; color:var(--ok); }
+  .word { font-size:40px; font-weight:600; letter-spacing:.5px; text-align:center; padding:12px 0 4px; }
+  .hint { text-align:center; color:var(--muted); font-size:14px; padding-bottom:8px; min-height:20px; }
+  .padwrap { flex:1; display:flex; padding:0 16px 8px; min-height:200px; }
+  canvas { flex:1; width:100%; height:100%; background:#fff; border:1px solid #cfcfcf; border-radius:10px; touch-action:none; }
+  .bottom { display:flex; justify-content:space-between; gap:10px; padding:10px 16px 16px; flex-wrap:wrap; }
+  .prog { height:6px; background:#e3e3e3; }
+  .prog > div { height:100%; background:var(--acc); width:0; transition:width .2s; }
+  .small { font-size:13px; color:var(--muted); }
+  textarea { width:100%; height:160px; font-family:monospace; font-size:11px; }
+  .box { background:#fff; border:1px solid #ddd; border-radius:10px; padding:16px 18px; margin:14px 0; }
+  .bad { color:var(--warn); }
+  .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); align-items:center; justify-content:center; z-index:10; padding:20px; }
+  .modal.on { display:flex; }
+  .modal .box { max-width:460px; width:100%; }
+</style>
+</head>
+<body>
+
+<!-- ============ START ============ -->
+<div class="screen on" id="s-start"><div class="wrap">
+  <h1>English handwriting collection: every word twice</h1>
+  <div class="box">
+    <p>You will write 100 English words <b>twice</b>, in two blocks:</p>
+    <ul>
+      <li><b>Fast</b>: the way you write for yourself, in notes or at a lecture. Do not try hard, do not correct.</li>
+      <li><b>Neat</b>: as if another person has to read it. Your own handwriting, just more careful; no block letters.</li>
+    </ul>
+    <p>Write in <b>cursive or joined-up handwriting if that is how you normally write</b>; otherwise your usual print. Write with a stylus. One attempt per word; if your hand slips, press “Clear” and write it again. Takes about 25–30 minutes. You can stop at any time: progress is saved in this browser.</p>
+  </div>
+  <label for="pid">Participant code (generated automatically, no names)</label>
+  <div class="row"><input type="text" id="pid" autocomplete="off" style="flex:1"><button id="btn-newcode">New code</button></div>
+  <label for="hand">Writing hand</label>
+  <select id="hand"><option value="right">right</option><option value="left">left</option></select>
+  <label><input type="checkbox" id="penonly" checked> Stylus only (ignore palm and finger touches)</label>
+  <label><input type="checkbox" id="consent"> I agree that my recorded pen trajectories will be used anonymously for scientific research and may be published as part of a dataset.</label>
+  <div class="row" style="margin-top:18px">
+    <button class="primary" id="btn-begin">Start</button>
+    <button id="btn-resume" style="display:none">Resume saved session</button>
+  </div>
+  <p class="small" id="start-msg"></p>
+  <div class="box" style="margin-top:18px">
+    <p style="margin-top:0"><b>Continue from an exported file</b> (another device or browser). The participant code, block order and all written words are restored; writing continues from the first missing word.</p>
+    <div class="row">
+      <input type="file" id="importfile" accept=".json,application/json" style="display:none">
+      <button id="btn-import-file">Load exported file…</button>
+      <button id="btn-import-paste-toggle">Paste exported text</button>
+    </div>
+    <div id="pastebox" style="display:none; margin-top:10px">
+      <textarea id="importtext" placeholder="Paste the exported JSON here"></textarea>
+      <button id="btn-import-paste" style="margin-top:8px">Continue from pasted text</button>
+    </div>
+  </div>
+</div></div>
+
+<!-- ============ CONFIRM DIALOG (window.confirm is blocked in some viewers) ============ -->
+<div class="modal" id="modal"><div class="box">
+  <p id="modal-text" style="margin-top:0"></p>
+  <div class="row"><button class="primary" id="modal-ok">OK</button><button id="modal-cancel">Cancel</button></div>
+</div></div>
+
+<!-- ============ BLOCK INTRO ============ -->
+<div class="screen" id="s-block"><div class="wrap">
+  <h1 id="block-title"></h1>
+  <div class="box" id="block-text"></div>
+  <button class="primary" id="btn-block-go">Got it, start the block</button>
+</div></div>
+
+<!-- ============ WRITE ============ -->
+<div class="screen" id="s-write">
+  <div class="prog"><div id="progbar"></div></div>
+  <div class="top">
+    <span class="mode" id="modebadge"></span>
+    <span class="small" id="counter"></span>
+    <span class="small" id="savestate"></span>
+    <span class="small" id="upstate"></span>
+  </div>
+  <div class="word" id="word"></div>
+  <div class="hint" id="hint"></div>
+  <div class="padwrap"><canvas id="pad"></canvas></div>
+  <div class="bottom">
+    <div class="row">
+      <button id="btn-back">← Back</button>
+      <button id="btn-undo">Undo stroke</button>
+      <button class="warn" id="btn-clear">Clear</button>
+    </div>
+    <div class="row">
+      <button id="btn-pause">Pause / export</button>
+      <button class="primary" id="btn-next">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DONE / EXPORT ============ -->
+<div class="screen" id="s-done"><div class="wrap">
+  <h1 id="done-title">Export</h1>
+  <p id="done-text"></p>
+  <div class="row">
+    <button class="primary" id="btn-download">Download file</button>
+    <button id="btn-copy">Copy to clipboard</button>
+    <button id="btn-continue">Back to writing</button>
+  </div>
+  <p class="small">If the file does not download (this happens in some embedded viewers), press “Copy” and paste the text into a message or a note.</p>
+  <textarea id="dump" readonly></textarea>
+  <div class="box">
+    <p class="small">New participant on the same device: export the data first, then</p>
+    <button class="warn" id="btn-reset">Delete session and start over</button>
+  </div>
+</div></div>
+
+<script>
+"use strict";
+// ---------------- word list (100 words, halves A/B) ----------------
+const WORDS = [{"idx": 1, "word": "such", "split": "A"}, {"idx": 2, "word": "love", "split": "A"}, {"idx": 3, "word": "blue", "split": "A"}, {"idx": 4, "word": "help", "split": "A"}, {"idx": 5, "word": "over", "split": "A"}, {"idx": 6, "word": "asks", "split": "A"}, {"idx": 7, "word": "type", "split": "A"}, {"idx": 8, "word": "dark", "split": "A"}, {"idx": 9, "word": "lazy", "split": "A"}, {"idx": 10, "word": "five", "split": "A"}, {"idx": 11, "word": "wait", "split": "A"}, {"idx": 12, "word": "yoke", "split": "A"}, {"idx": 13, "word": "brown", "split": "A"}, {"idx": 14, "word": "smart", "split": "A"}, {"idx": 15, "word": "sixth", "split": "A"}, {"idx": 16, "word": "boxer", "split": "A"}, {"idx": 17, "word": "sided", "split": "A"}, {"idx": 18, "word": "quick", "split": "A"}, {"idx": 19, "word": "gives", "split": "A"}, {"idx": 20, "word": "frogs", "split": "A"}, {"idx": 21, "word": "aside", "split": "A"}, {"idx": 22, "word": "fifth", "split": "A"}, {"idx": 23, "word": "symbol", "split": "A"}, {"idx": 24, "word": "sphinx", "split": "A"}, {"idx": 25, "word": "vulgar", "split": "A"}, {"idx": 26, "word": "review", "split": "A"}, {"idx": 27, "word": "quartz", "split": "A"}, {"idx": 28, "word": "unlike", "split": "A"}, {"idx": 29, "word": "rhythm", "split": "A"}, {"idx": 30, "word": "qualms", "split": "A"}, {"idx": 31, "word": "payable", "split": "A"}, {"idx": 32, "word": "already", "split": "A"}, {"idx": 33, "word": "jogging", "split": "A"}, {"idx": 34, "word": "affairs", "split": "A"}, {"idx": 35, "word": "pumpkin", "split": "A"}, {"idx": 36, "word": "returns", "split": "A"}, {"idx": 37, "word": "himself", "split": "A"}, {"idx": 38, "word": "exclaim", "split": "A"}, {"idx": 39, "word": "obscure", "split": "A"}, {"idx": 40, "word": "captains", "split": "A"}, {"idx": 41, "word": "moonbeam", "split": "A"}, {"idx": 42, "word": "enjoying", "split": "A"}, {"idx": 43, "word": "wretched", "split": "A"}, {"idx": 44, "word": "platform", "split": "A"}, {"idx": 45, "word": "childish", "split": "A"}, {"idx": 46, "word": "withdrew", "split": "A"}, {"idx": 47, "word": "neighbor", "split": "A"}, {"idx": 48, "word": "jackdaws", "split": "A"}, {"idx": 49, "word": "diplomacy", "split": "A"}, {"idx": 50, "word": "cupboards", "split": "A"}, {"idx": 51, "word": "days", "split": "B"}, {"idx": 52, "word": "with", "split": "B"}, {"idx": 53, "word": "pack", "split": "B"}, {"idx": 54, "word": "tell", "split": "B"}, {"idx": 55, "word": "long", "split": "B"}, {"idx": 56, "word": "what", "split": "B"}, {"idx": 57, "word": "left", "split": "B"}, {"idx": 58, "word": "zero", "split": "B"}, {"idx": 59, "word": "they", "split": "B"}, {"idx": 60, "word": "lost", "split": "B"}, {"idx": 61, "word": "hand", "split": "B"}, {"idx": 62, "word": "good", "split": "B"}, {"idx": 63, "word": "never", "split": "B"}, {"idx": 64, "word": "dozen", "split": "B"}, {"idx": 65, "word": "jumps", "split": "B"}, {"idx": 66, "word": "small", "split": "B"}, {"idx": 67, "word": "grasp", "split": "B"}, {"idx": 68, "word": "level", "split": "B"}, {"idx": 69, "word": "squid", "split": "B"}, {"idx": 70, "word": "mummy", "split": "B"}, {"idx": 71, "word": "fifty", "split": "B"}, {"idx": 72, "word": "judge", "split": "B"}, {"idx": 73, "word": "liquor", "split": "B"}, {"idx": 74, "word": "fourth", "split": "B"}, {"idx": 75, "word": "upward", "split": "B"}, {"idx": 76, "word": "floats", "split": "B"}, {"idx": 77, "word": "muzzle", "split": "B"}, {"idx": 78, "word": "object", "split": "B"}, {"idx": 79, "word": "debtor", "split": "B"}, {"idx": 80, "word": "subdue", "split": "B"}, {"idx": 81, "word": "jumping", "split": "B"}, {"idx": 82, "word": "anybody", "split": "B"}, {"idx": 83, "word": "heroism", "split": "B"}, {"idx": 84, "word": "unhappy", "split": "B"}, {"idx": 85, "word": "inquiry", "split": "B"}, {"idx": 86, "word": "lowland", "split": "B"}, {"idx": 87, "word": "rainbow", "split": "B"}, {"idx": 88, "word": "disgust", "split": "B"}, {"idx": 89, "word": "awkward", "split": "B"}, {"idx": 90, "word": "outdoor", "split": "B"}, {"idx": 91, "word": "drinking", "split": "B"}, {"idx": 92, "word": "knapsack", "split": "B"}, {"idx": 93, "word": "dwelling", "split": "B"}, {"idx": 94, "word": "puddings", "split": "B"}, {"idx": 95, "word": "rejected", "split": "B"}, {"idx": 96, "word": "politics", "split": "B"}, {"idx": 97, "word": "hoarsely", "split": "B"}, {"idx": 98, "word": "gunpowder", "split": "B"}, {"idx": 99, "word": "advancing", "split": "B"}, {"idx": 100, "word": "astronomy", "split": "B"}];
+
+const LS_KEY = "beautify_pairs_en_v2_session";
+
+// ---------------- Supabase upload (fill these two lines) ----------------
+// Project URL and the anon / publishable key: Supabase → Project Settings → API.
+// The key is meant to be public; the table only allows inserts (see the SQL that comes with this page).
+const SUPABASE_URL   = "";   // e.g. "https://abcdefghijkl.supabase.co"
+const SUPABASE_KEY   = "";   // anon key ("eyJ...") or publishable key ("sb_publishable_...")
+const SUPABASE_TABLE = "handwriting_items";
+let S = null;            // session state
+let cur = [];            // strokes of current item: [[ [x,y,t,p], ... ], ...]
+let drawing = false, t0 = null, itemStart = null, redo = 0;
+
+// ---------------- helpers ----------------
+function $(id){ return document.getElementById(id); }
+function show(id){ document.querySelectorAll(".screen").forEach(e=>e.classList.remove("on")); $(id).classList.add("on"); if(id==="s-write") resize(); }
+function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619);} return h>>>0; }
+function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function shuffle(a, r){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+// Browser storage can be blocked (sandboxed/embedded viewers, private mode). Fall back to memory
+// instead of crashing, and tell the participant to export before closing.
+const store = (function(){
+  let ls = null; const mem = {};
+  try{ ls = window.localStorage; const k="__probe__"; ls.setItem(k,"1"); ls.removeItem(k); }catch(e){ ls = null; }
+  return {
+    ok: !!ls,
+    get(k){ if(ls){ try{ return ls.getItem(k); }catch(e){} } return Object.prototype.hasOwnProperty.call(mem,k) ? mem[k] : null; },
+    set(k,v){ if(ls){ ls.setItem(k,v); } else { mem[k]=v; } },
+    del(k){ if(ls){ try{ ls.removeItem(k); }catch(e){} } delete mem[k]; }
+  };
+})();
+function save(){
+  const st = $("savestate");
+  try{
+    store.set(LS_KEY, JSON.stringify(S));
+    if(store.ok){ st.textContent="saved"; st.className="small"; }
+    else { st.textContent="not saved in browser: use “Pause / export” before closing"; st.className="small bad"; }
+  }catch(e){ st.textContent="NOT saved: "+e.name+" (export now)"; st.className="small bad"; }
+}
+function startMsg(text, bad){ const m=$("start-msg"); m.textContent=text; m.className = bad ? "small bad" : "small"; }
+// ---------------- upload queue ----------------
+// Every committed word goes into S.outbox and is sent as one row. Rows carry a client-made upload_id
+// (unique in the table), so a retry after a lost response returns 409 and is treated as delivered.
+const UPLOAD_ON = !!(SUPABASE_URL && SUPABASE_KEY);
+let flushing = false, retryTimer = null;
+function newUid(){
+  try{ if(crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+  const b = new Uint8Array(16); try{ crypto.getRandomValues(b); }catch(e){ for(let i=0;i<16;i++) b[i]=Math.floor(Math.random()*256); }
+  b[6]=(b[6]&15)|64; b[8]=(b[8]&63)|128;
+  const h=[...b].map(x=>x.toString(16).padStart(2,"0")).join("");
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+function rowOf(it){
+  return { upload_id:it.uid, participant:S.participant, mode:it.mode, word:it.word, word_idx:it.idx, split:it.split,
+    block:it.block, ord:it.order, started:it.started||null, finished:it.finished||null, dur_ms:it.dur_ms, n_strokes:it.n_strokes,
+    redo:it.redo||0, canvas:it.canvas||null, strokes:it.s, hand:S.hand, pen_only:!!S.pen_only,
+    user_agent:S.user_agent, session_created:S.created||null };
+}
+function enqueue(it){ if(!UPLOAD_ON) return; S.outbox = S.outbox || []; S.outbox.push(rowOf(it)); }
+function uploadStatus(){
+  if(!UPLOAD_ON || !S) return "";
+  const n = (S.outbox||[]).length;
+  return n ? `${n} waiting to upload` : "uploaded";
+}
+function renderUpload(){
+  const el = $("upstate"); if(!el) return;
+  const t = uploadStatus(); el.textContent = t ? "· " + t : "";
+  el.className = (S && S.outbox && S.outbox.length > 3) ? "small bad" : "small";
+}
+async function postRow(row){
+  const headers = { "apikey":SUPABASE_KEY, "Content-Type":"application/json", "Prefer":"return=minimal" };
+  if(SUPABASE_KEY.startsWith("eyJ")) headers["Authorization"] = "Bearer " + SUPABASE_KEY;
+  const r = await fetch(`${SUPABASE_URL.replace(/\/+$/,"")}/rest/v1/${SUPABASE_TABLE}`,
+    { method:"POST", headers, body:JSON.stringify(row) });
+  if(r.ok || r.status === 409) return true;          // 409 = this upload_id is already stored
+  let msg = ""; try{ msg = (await r.text()).slice(0,200); }catch(e){}
+  console.warn("Upload failed", r.status, msg);
+  return false;
+}
+async function flush(){
+  if(!UPLOAD_ON || !S || flushing) return;
+  flushing = true;
+  try{
+    while(S.outbox && S.outbox.length){
+      let ok = false;
+      try{ ok = await postRow(S.outbox[0]); }catch(e){ console.warn("Upload error", e); }
+      if(!ok) break;
+      S.outbox.shift(); save();
+    }
+  } finally {
+    flushing = false; renderUpload();
+    if(S && S.outbox && S.outbox.length && !retryTimer){ retryTimer = setTimeout(()=>{ retryTimer=null; flush(); }, 20000); }
+    if($("s-done").classList.contains("on")) renderDoneText();
+  }
+}
+window.addEventListener("online", ()=>flush());
+
+// In-page replacement for window.confirm(), which some embedded viewers silently block (returns false).
+function ask(text){
+  return new Promise(res=>{
+    $("modal-text").textContent = text; $("modal").classList.add("on");
+    const done = v=>{ $("modal").classList.remove("on"); res(v); };
+    $("modal-ok").onclick = ()=>done(true); $("modal-cancel").onclick = ()=>done(false);
+  });
+}
+
+// ---------------- session plan ----------------
+// Counterbalancing: block order (fast→neat or neat→fast) and word order are derived from the participant code.
+function makePlan(pid){
+  const h = hash(pid);
+  const fastFirst = (h % 2) === 0;
+  const blocks = fastFirst ? ["fast","neat"] : ["neat","fast"];
+  const plan = [];
+  blocks.forEach((mode, bi)=>{
+    const order = shuffle(WORDS.map((w,i)=>i), rng(h + 7919*(bi+1)));
+    order.forEach(i=>plan.push({ idx:WORDS[i].idx, word:WORDS[i].word, split:WORDS[i].split, mode, block:bi }));
+  });
+  return { blocks, plan };
+}
+
+// ---------------- start ----------------
+function init(){
+  $("btn-resume").style.display="none"; startMsg("");
+  const raw = store.get(LS_KEY);
+  if(raw){ try{ const old=JSON.parse(raw); if(old && old.items){ $("btn-resume").style.display="inline-block";
+      const n=old.items.filter(x=>x && x.s).length; startMsg(`Saved session “${old.participant}” found: ${n} of ${old.plan.length} words written.`); } }catch(e){} }
+  if(!store.ok) startMsg("Note: this viewer blocks browser storage, so progress is kept only while the page is open. Use “Pause / export” to save a file before closing.", true);
+  $("pid").value = newCode();
+}
+function newCode(){
+  const a=new Uint32Array(1);
+  try{ (window.crypto||window.msCrypto).getRandomValues(a); }catch(e){ a[0] = Math.floor(Math.random()*4294967296); }
+  return "p-" + a[0].toString(36).slice(0,6).padStart(6,"0");
+}
+init();
+$("btn-newcode").onclick = ()=>{ $("pid").value = newCode(); };
+
+$("btn-begin").onclick = async ()=>{
+  const pid = $("pid").value.trim();
+  if(!pid){ $("pid").value = newCode(); }
+  const pidv = $("pid").value.trim();
+  if(!$("consent").checked){ startMsg("Please tick the consent box first.", true); $("consent").focus(); return; }
+  if(store.get(LS_KEY) && !(await ask("A session already exists in this browser. Start a new one and overwrite it? (Export it first.)"))) return;
+  const {blocks, plan} = makePlan(pidv);
+  S = { format:"beautify_pairs_en_v2", language:"en", participant:pidv, hand:$("hand").value,
+        pen_only:$("penonly").checked, user_agent:navigator.userAgent, created:new Date().toISOString(),
+        blocks, plan, items:new Array(plan.length).fill(null), pos:0, canvas:null, outbox:[] };
+  save(); renderUpload(); enterItem();
+};
+$("btn-resume").onclick = ()=>{
+  try{ S = JSON.parse(store.get(LS_KEY)); }catch(e){ S = null; }
+  if(!S || !S.plan){ startMsg("The saved session could not be read.", true); return; }
+  S.outbox = S.outbox || [];
+  $("penonly").checked = !!S.pen_only; pendingBlockIntro = -1; enterItem(); flush();
+};
+
+// ---------------- block intros ----------------
+const BLOCK_TEXT = {
+  fast: `<p><b>“Fast” block.</b> Write the way you write for yourself: in notes, at a lecture, when in a hurry.</p>
+         <p>Do not try to write nicely and do not fix letters. If a word comes out sloppy, that is exactly what we need.</p>`,
+  neat: `<p><b>“Neat” block.</b> Write as if another person will read the note and must recognise every letter.</p>
+         <p>It should still be <b>your usual handwriting</b>, just more careful: do not switch to block letters and do not change the slant on purpose.</p>`
+};
+let pendingBlockIntro = -1;
+function enterItem(){
+  if(S.pos >= S.plan.length){ finish(); return; }
+  const it = S.plan[S.pos];
+  const firstOfBlock = S.pos===0 || S.plan[S.pos-1].block !== it.block;
+  if(firstOfBlock && pendingBlockIntro !== it.block && !S.items[S.pos]){
+    pendingBlockIntro = it.block;
+    $("block-title").textContent = `Block ${it.block+1} of 2: ${it.mode==="fast"?"fast":"neat"}`;
+    $("block-text").innerHTML = BLOCK_TEXT[it.mode] + `<p class="small">100 words in random order.</p>`;
+    show("s-block"); return;
+  }
+  show("s-write"); loadItem();
+}
+$("btn-block-go").onclick = ()=>{ show("s-write"); loadItem(); };
+
+// ---------------- writing pad ----------------
+const pad = $("pad"); const ctx = pad.getContext("2d");
+let dpr = 1;
+function resize(){
+  const r = pad.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  pad.width = Math.round(r.width*dpr); pad.height = Math.round(r.height*dpr);
+  if(S){ S.canvas = { w:Math.round(r.width), h:Math.round(r.height), dpr }; }
+  redraw();
+}
+window.addEventListener("resize", ()=>{ if($("s-write").classList.contains("on")) resize(); });
+
+function redraw(){
+  const w = pad.width, h = pad.height;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,w,h);
+  // baseline guide at 62% height, faint x-height guide
+  ctx.strokeStyle="#e4e4e4"; ctx.lineWidth=1*dpr; ctx.setLineDash([6*dpr,6*dpr]);
+  ctx.beginPath(); ctx.moveTo(0,h*0.62); ctx.lineTo(w,h*0.62); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle="#1b1b1b"; ctx.lineCap="round"; ctx.lineJoin="round";
+  for(const st of cur){
+    if(!st.length) continue;
+    ctx.beginPath();
+    for(let i=0;i<st.length;i++){
+      const [x,y,,p] = st[i];
+      ctx.lineWidth = (1.6 + 1.6*(p>0?p:0.5))*dpr;
+      if(i===0) ctx.moveTo(x*dpr,y*dpr); else ctx.lineTo(x*dpr,y*dpr);
+    }
+    if(st.length===1){ ctx.lineTo(st[0][0]*dpr+0.1, st[0][1]*dpr+0.1); }
+    ctx.stroke();
+  }
+}
+
+function accept(e){ return !S.pen_only || e.pointerType === "pen" || e.pointerType === "mouse"; }
+function ptOf(e){ const r = pad.getBoundingClientRect(); return [ +(e.clientX-r.left).toFixed(2), +(e.clientY-r.top).toFixed(2), Math.round(performance.now()-t0), +(e.pressure||0).toFixed(3) ]; }
+
+pad.addEventListener("pointerdown", e=>{
+  if(!accept(e)) return; e.preventDefault();
+  if(t0===null){ t0 = performance.now(); itemStart = new Date().toISOString(); }
+  drawing = true; pad.setPointerCapture(e.pointerId);
+  cur.push([ptOf(e)]); redraw(); updateButtons();
+});
+pad.addEventListener("pointermove", e=>{
+  if(!drawing || !accept(e)) return; e.preventDefault();
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  const st = cur[cur.length-1];
+  for(const ce of evs){ st.push(ptOf(ce)); }
+  redraw();
+});
+function endStroke(e){ if(!drawing) return; drawing=false; try{ pad.releasePointerCapture(e.pointerId);}catch(_){} updateButtons(); }
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+document.addEventListener("touchmove", e=>{ if(e.target===pad) e.preventDefault(); }, {passive:false});
+
+// ---------------- item navigation ----------------
+function loadItem(){
+  const it = S.plan[S.pos]; const saved = S.items[S.pos];
+  cur = saved && saved.s ? JSON.parse(JSON.stringify(saved.s)) : [];
+  t0 = null; itemStart = saved ? saved.started : null; redo = saved ? (saved.redo||0) : 0;
+  $("word").textContent = it.word;
+  const badge = $("modebadge"); badge.className = "mode " + it.mode;
+  badge.textContent = it.mode==="fast" ? "FAST: like your own notes" : "NEAT: for another reader";
+  $("hint").textContent = saved && saved.s ? "Already written. You can clear it and write again." : "";
+  const done = S.items.filter(x=>x && x.s).length;
+  $("counter").textContent = `word ${ (S.pos % WORDS.length) + 1 } / ${WORDS.length} in block · total ${done} / ${S.plan.length}`;
+  $("progbar").style.width = (100*done/S.plan.length).toFixed(1)+"%";
+  resize(); updateButtons();
+}
+function updateButtons(){
+  $("btn-next").disabled = cur.length===0;
+  $("btn-undo").disabled = cur.length===0;
+  $("btn-clear").disabled = cur.length===0;
+  $("btn-back").disabled = S.pos===0;
+}
+function commit(){
+  if(!cur.length) return;
+  const it = S.plan[S.pos];
+  const prev = S.items[S.pos];
+  // re-base times so the item starts at t=0 (keeps original timing if unchanged)
+  const tmin = Math.min(...cur.map(st=>st[0][2]));
+  const s = cur.map(st=>st.map(([x,y,t,p])=>[x,y,t-tmin,p]));
+  const last = s[s.length-1]; 
+  // Unchanged item (e.g. went Back and Next again): keep it and do not upload it twice.
+  if(prev && prev.s && JSON.stringify(prev.s) === JSON.stringify(s)) return;
+  S.items[S.pos] = { idx:it.idx, word:it.word, split:it.split, mode:it.mode, block:it.block, order:S.pos,
+    canvas:S.canvas, started:itemStart || (prev && prev.started) || new Date().toISOString(),
+    finished:new Date().toISOString(), dur_ms:last[last.length-1][2], n_strokes:s.length, redo, s, uid:newUid() };
+  enqueue(S.items[S.pos]);
+  save(); renderUpload(); flush();
+}
+$("btn-next").onclick = ()=>{ commit(); S.pos++; save(); enterItem(); };
+$("btn-back").onclick = ()=>{ if(cur.length) commit(); if(S.pos>0){ S.pos--; save(); show("s-write"); loadItem(); } };
+$("btn-undo").onclick = ()=>{ cur.pop(); if(!cur.length) t0=null; redraw(); updateButtons(); };
+$("btn-clear").onclick = ()=>{ cur=[]; t0=null; redo++; redraw(); updateButtons(); };
+document.addEventListener("keydown", e=>{
+  if(!$("s-write").classList.contains("on")) return;
+  if(e.key==="Enter" && !$("btn-next").disabled) $("btn-next").click();
+  if((e.key==="z"||e.key==="я") && (e.metaKey||e.ctrlKey)) $("btn-undo").click();
+});
+
+// ---------------- export ----------------
+function exportObj(){
+  const items = S.items.filter(x=>x && x.s);
+  return { format:S.format, participant:S.participant, hand:S.hand, pen_only:S.pen_only,
+           user_agent:S.user_agent, created:S.created, exported:new Date().toISOString(), blocks:S.blocks,
+           coords:"CSS pixels relative to the writing area; y grows downward; t = ms from first point of the item; p = stylus pressure (0 if unsupported)",
+           n_items:items.length, n_planned:S.plan.length, items };
+}
+function renderDoneText(){
+  const n = S.items.filter(x=>x && x.s).length;
+  const el = $("done-text"); el.className = "";
+  if(!UPLOAD_ON){ el.textContent = `${n} of ${S.plan.length} words written. Download the file and send it to us.`; return; }
+  const left = (S.outbox||[]).length;
+  if(!left){ el.textContent = `${n} of ${S.plan.length} words written, and all of them have reached us. You can close this page. The file below is only a backup.`; }
+  else { el.textContent = `${n} of ${S.plan.length} words written; ${left} have not been uploaded yet (no connection?). Keep this page open while online, or download the file and send it to us.`; el.className = "bad"; }
+}
+function finish(){
+  const n = S.items.filter(x=>x && x.s).length;
+  $("done-title").textContent = n>=S.plan.length ? "Done, thank you!" : "Pause / export";
+  renderDoneText();
+  $("dump").value = JSON.stringify(exportObj());
+  show("s-done"); flush();
+}
+$("btn-pause").onclick = ()=>{ if(cur.length) commit(); save(); finish(); };
+$("btn-continue").onclick = ()=>{ if(S.pos>=S.plan.length) S.pos=S.plan.length-1; enterItem(); };
+// When hosted as a claude.ai page, direct downloads are blocked; the "downloads" capability saves the file instead.
+let hostDownloads = null;
+try{ if(window.claude && typeof window.claude.use === "function"){ window.claude.use("downloads").then(d=>{ hostDownloads = d; }).catch(()=>{}); } }catch(e){}
+$("btn-download").onclick = async ()=>{
+  const text = JSON.stringify(exportObj());
+  const name = `beautify_en_${S.participant}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;
+  if(hostDownloads){
+    try{ await hostDownloads.save({ filename:name, data:text }); $("btn-download").textContent = "Downloaded"; }
+    catch(e){ if(!e || e.code !== "declined") $("done-text").textContent += " Download is unavailable here: press “Copy” and paste the text into a message."; }
+    return;
+  }
+  const blob = new Blob([text], {type:"application/json"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+};
+$("btn-copy").onclick = async ()=>{
+  const t = $("dump"); t.select();
+  try{ await navigator.clipboard.writeText(t.value); $("btn-copy").textContent="Copied"; }
+  catch(e){ document.execCommand("copy"); $("btn-copy").textContent="Copied"; }
+};
+// ---------------- import (continue from an exported file) ----------------
+function importObj(obj){
+  if(!obj || !Array.isArray(obj.items) || !obj.participant) throw new Error("This does not look like an exported session file.");
+  if(obj.format && !String(obj.format).startsWith("beautify_pairs_en")) throw new Error("This file is from a different collection page (" + obj.format + ").");
+  const {blocks, plan} = makePlan(obj.participant);
+  if(obj.blocks && obj.blocks.join(",") !== blocks.join(",")) throw new Error("Block order in the file does not match its participant code.");
+  const items = new Array(plan.length).fill(null);
+  const key = (mode, word) => mode + "|" + word;
+  const posOf = {}; plan.forEach((it, i) => { posOf[key(it.mode, it.word)] = i; });
+  let n = 0, skipped = 0;
+  for(const it of obj.items){
+    const i = posOf[key(it.mode, it.word)];
+    if(i === undefined || !it.s || !it.s.length){ skipped++; continue; }
+    items[i] = Object.assign({}, it, { order:i }); n++;
+  }
+  let pos = items.findIndex(x => !x); if(pos < 0) pos = plan.length;
+  S = { format:"beautify_pairs_en_v2", language:"en", participant:obj.participant, hand:obj.hand || "right",
+        pen_only: obj.pen_only !== false, user_agent:navigator.userAgent, created:obj.created || new Date().toISOString(),
+        imported_from: obj.exported || null, blocks, plan, items, pos, canvas:null, outbox:[] };
+  // Re-send imported words; ones already uploaded from the other device are skipped by upload_id (409).
+  items.forEach(it=>{ if(it){ if(!it.uid) it.uid = newUid(); enqueue(it); } });
+  return {n, skipped};
+}
+async function doImport(text){
+  let obj;
+  try{ obj = JSON.parse(text); }catch(e){ startMsg("Could not read the file: not valid JSON.", true); return; }
+  if(store.get(LS_KEY) && !(await ask("A session already exists in this browser. Replace it with the imported one?"))) return;
+  try{
+    const {n, skipped} = importObj(obj);
+    save(); $("penonly").checked = !!S.pen_only;
+    startMsg(`Imported “${S.participant}”: ${n} of ${S.plan.length} words restored` + (skipped ? `, ${skipped} skipped.` : "."));
+    pendingBlockIntro = (S.pos < S.plan.length && S.pos > 0 && S.plan[S.pos].block === S.plan[S.pos-1].block) ? S.plan[S.pos].block : -1;
+    enterItem(); flush();
+  }catch(e){ startMsg(e.message, true); }
+}
+$("btn-import-file").onclick = ()=> $("importfile").click();
+$("importfile").onchange = (e)=>{
+  const f = e.target.files && e.target.files[0]; if(!f) return;
+  const r = new FileReader(); r.onload = ()=> doImport(String(r.result)); r.readAsText(f); e.target.value = "";
+};
+$("btn-import-paste-toggle").onclick = ()=>{ const b=$("pastebox"); b.style.display = b.style.display==="none" ? "block" : "none"; };
+$("btn-import-paste").onclick = ()=> doImport($("importtext").value);
+
+$("btn-reset").onclick = async ()=>{
+  const left = (S && S.outbox) ? S.outbox.length : 0;
+  if(!(await ask("Delete all recordings of this session from the browser? Make sure you have exported them." +
+    (left ? ` ${left} words have NOT been uploaded yet and will be lost.` : "")))) return;
+  store.del(LS_KEY); S = null; cur = []; t0 = null; pendingBlockIntro = -1;
+  $("consent").checked = false; $("btn-copy").textContent = "Copy to clipboard";
+  init(); show("s-start");
+};
+</script>
+</body>
+</html>

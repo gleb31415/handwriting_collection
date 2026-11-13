@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex">
+<title>Оценка почерка 1–5</title>
+<style>
+  :root { --bg:#f6f5f2; --ink:#1b1b1b; --muted:#777; --acc:#2f6fb2; --warn:#b5482d; --ok:#2f8a4a; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-user-select:none; user-select:none; }
+  .screen { display:none; min-height:100%; flex-direction:column; }
+  .screen.on { display:flex; }
+  .wrap { max-width:760px; margin:0 auto; padding:24px 20px; }
+  h1 { font-size:22px; margin:0 0 12px; }
+  p, li { line-height:1.45; font-size:15px; }
+  label { display:block; margin:14px 0 4px; font-size:14px; color:#444; }
+  input[type=text] { font-size:16px; padding:8px 10px; width:100%; border:1px solid #ccc; border-radius:6px; background:#fff; }
+  .chk { display:flex; gap:18px; flex-wrap:wrap; } .chk label { display:flex; gap:6px; align-items:center; margin:6px 0; font-size:15px; color:var(--ink); }
+  button { font-size:16px; padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; cursor:pointer; color:var(--ink); }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button:disabled { opacity:.4; cursor:default; }
+  .top { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; background:#fff; border-bottom:1px solid #ddd; gap:12px; flex-wrap:wrap; }
+  .prog { height:6px; background:#e3e3e3; } .prog > div { height:100%; background:var(--acc); width:0; transition:width .2s; }
+  .padwrap { flex:1; display:flex; padding:14px 16px 6px; min-height:240px; }
+  canvas { flex:1; width:100%; height:100%; min-height:240px; background:#fff; border:1px solid #cfcfcf; border-radius:10px; }
+  .word { text-align:center; color:var(--muted); font-size:15px; min-height:22px; }
+  .rates { display:flex; gap:10px; justify-content:center; padding:10px 16px; flex-wrap:wrap; }
+  .r { font-size:26px; width:96px; height:76px; padding:4px; }
+  .r small { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+  .r.sel { background:var(--acc); color:#fff; border-color:var(--acc); } .r.sel small { color:#e8eef6; }
+  .r:active { transform:scale(.97); }
+  .bottom { display:flex; justify-content:center; gap:10px; padding:4px 16px 16px; flex-wrap:wrap; }
+  .small { font-size:13px; color:var(--muted); }
+  .bad { color:var(--warn); } .okc { color:var(--ok); }
+  .box { background:#fff; border:1px solid #ddd; border-radius:10px; padding:14px 18px; margin:14px 0; }
+  .scale td { padding:3px 8px; vertical-align:top; font-size:14px; } .scale td:first-child { font-weight:700; font-size:16px; }
+  textarea { width:100%; height:140px; font-family:monospace; font-size:11px; }
+  .up.busy { color:var(--acc); } .up.ok { color:var(--ok); } .up.bad { color:var(--warn); }
+  @media (max-width:560px){ .r { width:60px; height:66px; font-size:22px; } .r small { font-size:9px; } }
+</style>
+</head>
+<body>
+
+<!-- start -->
+<div class="screen on" id="s-start"><div class="wrap">
+  <h1>Оценка красоты почерка</h1>
+  <p>Вы увидите около 1000 рукописных слов на русском и английском. Каждому поставьте оценку от 1 до 5: насколько <b>красиво и аккуратно</b> оно написано.
+     Это займёт 30–40 минут, можно с перерывами: прогресс сохраняется, а каждая оценка сразу отправляется на сервер.</p>
+  <div class="box">
+    <table class="scale">
+      <tr><td>1</td><td>неряшливо: каракули, буквы не разобрать, кривые наезды</td></tr>
+      <tr><td>2</td><td>небрежно: читается с трудом, линия гуляет, буквы разного размера</td></tr>
+      <tr><td>3</td><td>обычный повседневный почерк</td></tr>
+      <tr><td>4</td><td>аккуратно: ровно, буквы чёткие и однородные</td></tr>
+      <tr><td>5</td><td>красиво: так хотелось бы писать, можно показать как образец</td></tr>
+    </table>
+    <p class="small">Оцениваем аккуратность и красоту, <b>не стиль</b>: размашистый, печатный или слитный почерк может быть на 5.
+       Слово по умолчанию скрыто, чтобы оценка шла по виду; кнопка «показать слово» его открывает. Несколько слов повторяются специально.</p>
+  </div>
+  <label for="rater">Ваше имя или код (латиницей, одинаковый при каждом входе)</label>
+  <input type="text" id="rater" maxlength="40" autocomplete="off" placeholder="например, gleb">
+  <label>Какие слова показывать</label>
+  <div class="chk">
+    <label><input type="checkbox" id="lang-ru" checked> русские</label>
+    <label><input type="checkbox" id="lang-en" checked> английские</label>
+  </div>
+  <p class="small" id="start-msg"></p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    <button class="primary" id="btn-start">Начать</button>
+    <button id="btn-resume" style="display:none">Продолжить</button>
+  </div>
+</div></div>
+
+<!-- rating -->
+<div class="screen" id="s-rate">
+  <div class="top">
+    <b id="cnt"></b>
+    <span class="up upstate"></span>
+    <div style="display:flex;gap:8px">
+      <button id="btn-pause">Пауза / экспорт</button>
+    </div>
+  </div>
+  <div class="prog"><div id="fill"></div></div>
+  <div class="padwrap"><canvas id="cv"></canvas></div>
+  <div class="word" id="word"></div>
+  <div class="rates" id="rates"></div>
+  <div class="bottom">
+    <button id="btn-back">← назад</button>
+    <button id="btn-show">показать слово</button>
+    <button id="btn-skip">пропустить</button>
+  </div>
+  <p class="small" style="text-align:center;margin:0 0 12px">Клавиши: 1–5 оценка, Backspace назад, T показать слово, 0 пропустить</p>
+</div>
+
+<!-- pause / done -->
+<div class="screen" id="s-done"><div class="wrap">
+  <h1 id="done-title">Пауза</h1>
+  <p id="done-text"></p>
+  <p class="up upstate"></p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="primary" id="btn-continue">Продолжить оценку</button>
+    <button id="btn-export">Скачать файл с оценками</button>
+    <button id="btn-copy">Скопировать</button>
+  </div>
+  <p class="small">Файл нужен только если сервер недоступен: всё, что отмечено «отправлено», уже сохранено.</p>
+  <textarea id="ta" readonly style="display:none"></textarea>
+</div></div>
+
+<script>
+"use strict";
+// ---------------- Supabase (same project and key as the collection page; the table only accepts inserts) ----------------
+const SUPABASE_URL   = "https://mfnnodremhlvdkjjqqew.supabase.co";
+const SUPABASE_KEY   = "sb_publishable_isrN_bmBGuzZ8PakbkvX9Q_tcZ87m_I";
+const SUPABASE_TABLE = "beauty_ratings";
+const ITEM_SET = "beauty_v1";
+const LS_KEY = "beauty_rate_v1_session", OUT_KEY = "beauty_rate_v1_outbox";
+const LABELS = ["", "неряшливо", "небрежно", "обычно", "аккуратно", "красиво"];
+
+let DATA = null, ITEMS = {}, S = null, showText = false, shownAt = 0;
+
+function $(id){ return document.getElementById(id); }
+function show(id){ document.querySelectorAll(".screen").forEach(e=>e.classList.remove("on")); $(id).classList.add("on"); if(id==="s-rate") draw(); }
+function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619);} return h>>>0; }
+function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function shuffle(a, r){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const store = (function(){
+  let ls = null; const mem = {};
+  try{ ls = window.localStorage; ls.setItem("__p","1"); ls.removeItem("__p"); }catch(e){ ls = null; }
+  return { ok:!!ls,
+    get(k){ if(ls){ try{ return ls.getItem(k); }catch(e){} } return Object.prototype.hasOwnProperty.call(mem,k) ? mem[k] : null; },
+    set(k,v){ if(ls){ ls.setItem(k,v); } else { mem[k]=v; } } };
+})();
+function save(){ try{ store.set(LS_KEY, JSON.stringify(S)); }catch(e){} }
+function newUid(){
+  try{ if(crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+  const b = new Uint8Array(16); try{ crypto.getRandomValues(b); }catch(e){ for(let i=0;i<16;i++) b[i]=Math.floor(Math.random()*256); }
+  b[6]=(b[6]&15)|64; b[8]=(b[8]&63)|128; const h=[...b].map(x=>x.toString(16).padStart(2,"0")).join("");
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+function langOf(it){ return it.src.startsWith("ru") ? "ru" : "en"; }
+
+// ---------------- upload queue (one POST per rating; upload_id unique -> retries are safe) ----------------
+let OUT = (function(){ try{ const v = JSON.parse(store.get(OUT_KEY) || "[]"); return Array.isArray(v) ? v : []; }catch(e){ return []; } })();
+let flushing = false, retryTimer = null, lastErr = "", sentN = 0;
+function saveOut(){ try{ store.set(OUT_KEY, JSON.stringify(OUT)); }catch(e){} }
+function renderUpload(){
+  let text = "", cls = "up upstate"; const left = OUT.length;
+  if(flushing && left){ text = `отправка… осталось ${left}`; cls += " busy"; }
+  else if(left){ text = `⚠ не отправлено: ${left}` + (lastErr ? ` (${lastErr})` : "") + ", повторю"; cls += " bad"; }
+  else if(S && S.r.length){ text = `✓ всё отправлено`; cls += " ok"; }
+  document.querySelectorAll(".upstate").forEach(el=>{ el.textContent = text; el.className = cls; });
+}
+async function postRow(row){
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}`,
+    { method:"POST", headers:{ "apikey":SUPABASE_KEY, "Content-Type":"application/json", "Prefer":"return=minimal" }, body:JSON.stringify(row) });
+  if(r.ok || r.status === 409) return true;
+  let msg = ""; try{ const t = await r.text(); try{ msg = JSON.parse(t).message || t; }catch(_){ msg = t; } }catch(e){}
+  lastErr = `ошибка сервера ${r.status}` + (msg ? `: ${String(msg).slice(0,80)}` : ""); return false;
+}
+async function flush(){
+  if(flushing) return; flushing = true; renderUpload();
+  try{
+    while(OUT.length){
+      const row = OUT[0]; let ok = false;
+      try{ ok = await postRow(row); }catch(e){ lastErr = navigator.onLine === false ? "нет интернета" : "сервер недоступен"; }
+      if(!ok) break;
+      lastErr = ""; sentN++; OUT = OUT.filter(x=>x.upload_id !== row.upload_id); saveOut(); renderUpload();
+    }
+  } finally {
+    flushing = false; renderUpload();
+    if(OUT.length && !retryTimer) retryTimer = setTimeout(()=>{ retryTimer = null; flush(); }, 15000);
+  }
+}
+window.addEventListener("online", ()=>flush());
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState === "visible") flush(); });
+window.addEventListener("beforeunload", e=>{ if(OUT.length){ e.preventDefault(); e.returnValue = ""; } });
+
+// ---------------- session plan: per-rater shuffled order, repeats in the last two thirds ----------------
+function makeOrder(rater, langs){
+  const r = rng(hash(rater + "|" + ITEM_SET));
+  const ids = shuffle(DATA.items.filter(it=>langs.includes(langOf(it))).map(it=>it.id), r);
+  const inSet = new Set(ids);
+  const reps = shuffle(DATA.repeats.filter(id=>inSet.has(id)), r);
+  const order = ids.map(id=>({ id, rep:false }));
+  reps.forEach(id=>{
+    const first = order.findIndex(x=>x.id===id);
+    const lo = Math.max(first + 60, Math.floor(order.length/3)), hi = order.length;
+    const at = lo >= hi ? hi : lo + Math.floor(r()*(hi - lo));
+    order.splice(at, 0, { id, rep:true });
+  });
+  return order;
+}
+function startSession(rater, langs){
+  S = { rater, langs, created:new Date().toISOString(), order:makeOrder(rater, langs), pos:0, r:[], ua:navigator.userAgent.slice(0,200) };
+  save(); show("s-rate");
+}
+
+// ---------------- drawing ----------------
+const cv = $("cv"), cx = cv.getContext("2d");
+function draw(){
+  if(!S) return;
+  const n = S.order.length, done = S.pos >= n;
+  $("cnt").textContent = `${Math.min(S.pos+1, n)} / ${n}`;
+  $("fill").style.width = (100*S.pos/n) + "%";
+  if(done){ finish(); return; }
+  const it = ITEMS[S.order[S.pos].id];
+  $("word").textContent = showText ? it.text : "";
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr);
+  cx.setTransform(dpr,0,0,dpr,0,0); cx.clearRect(0,0,w,h);
+  let x0=1e9, x1=-1e9, y0=1e9, y1=-1e9;
+  it.s.forEach(s=>{ for(let i=0;i<s.length;i+=2){ x0=Math.min(x0,s[i]); x1=Math.max(x1,s[i]); y0=Math.min(y0,s[i+1]); y1=Math.max(y1,s[i+1]); } });
+  const pad = 28, sc = Math.min((w-2*pad)/Math.max(x1-x0,1), (h-2*pad)/Math.max(y1-y0,1));
+  const ox = (w-(x1-x0)*sc)/2, oy = (h-(y1-y0)*sc)/2;
+  cx.lineWidth = Math.max(2, Math.min(5, sc*2.6)); cx.lineCap = "round"; cx.lineJoin = "round"; cx.strokeStyle = "#1b1b1b";
+  it.s.forEach(s=>{
+    cx.beginPath();
+    for(let i=0;i<s.length;i+=2){ const X = ox+(s[i]-x0)*sc, Y = oy+(s[i+1]-y0)*sc; i ? cx.lineTo(X,Y) : cx.moveTo(X,Y); }
+    if(s.length === 2) cx.lineTo(ox+(s[0]-x0)*sc+0.5, oy+(s[1]-y0)*sc);
+    cx.stroke();
+  });
+  const prev = lastScore(S.pos);
+  [...$("rates").children].forEach((b,i)=>b.classList.toggle("sel", prev === i+1));
+  shownAt = Date.now();
+}
+window.addEventListener("resize", ()=>{ if($("s-rate").classList.contains("on")) draw(); });
+function lastScore(pos){ for(let i=S.r.length-1;i>=0;i--) if(S.r[i].pos===pos) return S.r[i].score; return null; }
+
+// ---------------- rating ----------------
+function rate(score){
+  if(!S || S.pos >= S.order.length) return;
+  const o = S.order[S.pos], it = ITEMS[o.id];
+  const row = { upload_id:newUid(), rater:S.rater, item_set:ITEM_SET, item_id:o.id, score, pos:S.pos, is_repeat:o.rep,
+    src:it.src, text:it.text, writer:it.writer, mode:it.mode||null, bin:it.bin||null, variant:it.variant||null,
+    text_shown:showText, dur_ms:Date.now()-shownAt, rated_at:new Date().toISOString(), langs:S.langs.join(","),
+    user_agent:S.ua, session_created:S.created };
+  S.r.push({ pos:S.pos, id:o.id, score, t:row.rated_at, uid:row.upload_id });
+  OUT.push(row); saveOut();
+  S.pos++; showText = false; save(); draw(); flush();
+}
+function finish(){
+  const n = S.r.filter(x=>x.score>0).length;
+  $("done-title").textContent = "Готово, спасибо!";
+  $("done-text").textContent = `Оценено слов: ${n}. Если внизу написано «всё отправлено», больше ничего делать не нужно.`;
+  $("btn-continue").style.display = "none"; show("s-done"); renderUpload();
+}
+function payload(){
+  return JSON.stringify({ format:"beauty_ratings_v1", item_set:ITEM_SET, rater:S.rater, langs:S.langs, pos:S.pos, n_order:S.order.length,
+    ratings:S.r.map(x=>{ const it = ITEMS[x.id]; return { pos:x.pos, id:x.id, score:x.score, t:x.t, src:it.src, text:it.text, writer:it.writer, mode:it.mode||null, bin:it.bin||null, variant:it.variant||null }; }) });
+}
+
+// ---------------- UI wiring ----------------
+for(let k=1;k<=5;k++){ const b=document.createElement("button"); b.className="r"; b.innerHTML=`${k}<small>${LABELS[k]}</small>`; b.onclick=()=>rate(k); $("rates").appendChild(b); }
+$("btn-back").onclick = ()=>{ if(S && S.pos>0){ S.pos--; showText=false; save(); draw(); } };
+$("btn-skip").onclick = ()=>rate(0);
+$("btn-show").onclick = ()=>{ showText = !showText; draw(); };
+$("btn-pause").onclick = ()=>{ $("done-title").textContent = "Пауза"; $("done-text").textContent = `Оценено ${S.r.filter(x=>x.score>0).length} из ${S.order.length}. Можно закрыть страницу и вернуться позже с тем же именем.`;
+  $("btn-continue").style.display = ""; show("s-done"); renderUpload(); };
+$("btn-continue").onclick = ()=>show("s-rate");
+$("btn-export").onclick = ()=>{ const b=new Blob([payload()],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=`beauty_ratings_${S.rater}.json`; document.body.appendChild(a); a.click(); a.remove(); };
+$("btn-copy").onclick = async ()=>{ try{ await navigator.clipboard.writeText(payload()); $("btn-copy").textContent="Скопировано"; }catch(e){ $("ta").style.display="block"; $("ta").value=payload(); } };
+document.addEventListener("keydown", e=>{
+  if(!$("s-rate").classList.contains("on") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if(e.key >= "1" && e.key <= "5") rate(+e.key);
+  else if(e.key === "0") rate(0);
+  else if(e.key === "Backspace"){ e.preventDefault(); $("btn-back").onclick(); }
+  else if("tTеЕ".includes(e.key)){ showText = !showText; draw(); }
+});
+$("btn-start").onclick = async ()=>{
+  const rater = $("rater").value.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, "");
+  const langs = [$("lang-ru").checked && "ru", $("lang-en").checked && "en"].filter(Boolean);
+  if(!rater){ $("start-msg").textContent = "Введите имя или код латиницей."; $("start-msg").className = "small bad"; return; }
+  if(!langs.length){ $("start-msg").textContent = "Выберите хотя бы один язык."; $("start-msg").className = "small bad"; return; }
+  if(S && S.rater === rater && S.pos < S.order.length && S.langs.join() === langs.join()){ show("s-rate"); return; }
+  startSession(rater, langs);
+};
+$("btn-resume").onclick = ()=>show("s-rate");
+
+async function init(){
+  $("btn-start").disabled = true; $("start-msg").textContent = "Загрузка слов…";
+  try{
+    const r = await fetch("items.json", { cache:"no-cache" }); DATA = await r.json();
+    DATA.items.forEach(it=>ITEMS[it.id] = it);
+    $("start-msg").textContent = store.ok ? "" : "Браузер не даёт сохранять прогресс: оценки всё равно уходят на сервер, но после закрытия страницы придётся начать заново.";
+    $("btn-start").disabled = false;
+  }catch(e){ $("start-msg").textContent = "Не удалось загрузить слова, обновите страницу."; $("start-msg").className = "small bad"; return; }
+  try{ const v = JSON.parse(store.get(LS_KEY) || "null"); if(v && v.order && v.item_set !== "x"){ S = v; } }catch(e){}
+  if(S){ $("rater").value = S.rater; $("lang-ru").checked = S.langs.includes("ru"); $("lang-en").checked = S.langs.includes("en");
+    if(S.pos < S.order.length){ $("btn-resume").style.display = ""; $("btn-resume").textContent = `Продолжить (${S.pos} / ${S.order.length})`; } }
+  renderUpload(); flush();
+}
+init();
+</script>
+</body>
+</html>
